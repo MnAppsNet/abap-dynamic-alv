@@ -1,5 +1,5 @@
 # ABAP Dynamic ALV
-Create and display easily an ALV on ABAP
+Create and display an ALV on ABAP easily
 
 # How to use :
               > Use static method add_instraction to add a field on the output ALV
