@@ -40,7 +40,6 @@
 *&                 *im_row_number : The row number from the rows selected (ex. 1st, 2nd ...) (optional, Default = 1 )
 *&                 *ch_struct     : The row is returned here
 *&---------------------------------------------------------------------------------------------------------------*
-REPORT ztest.
 
 CLASS cl_alv DEFINITION.
 
