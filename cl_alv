@@ -1,0 +1,261 @@
+*&---------------------------------------------------------------------------------------------------------------*
+*& Static Class CL_ALV
+*&---------------------------------------------------------------------------------------------------------------*
+*& Author   : Kalyvas Emmanouil
+*& Created  : 20/01/2020
+*& Comments : How to use :
+*&              > Use static method add_instraction to add a field on the output ALV
+*&                It takes 2 mandatory field :
+*&                  *im_table : the table refference that contains the field we want to add
+*&                  *im_fieldname : the name of the field that we want to add to ALV
+*&              > Use static method add_column_instraction to change ALV column properties
+*&                It takes 2 mandatory field and 4 oprional :
+*&                  *column_name        : The name of the column to make the changes
+*&                  *column_text        : The header of the column
+*&                  *column_text_medium : The medium size header of the column (optional, Default = column_text)
+*&                  *column_text_short  : The short size header of the column  (optional, Default = column_text)
+*&                  *column_length      : The length of the column             (optional, Default = Optimal)
+*&                  *column_vissible    : The vissibility of the column        (optional, Default = Vissible)
+*&              > Use static method create_alv to build the ALV and prepair for display
+*&              > Use static method display_alv to display the ALV created (need to be created first)
+*&              > Change global static object alv_table to make any further changes on the ALV output
+*&                (need to be created first)
+*&---------------------------------------------------------------------------------------------------------------*
+
+*&---------------------------------------------------------------------------------------------------------------*
+*&                                                DEFINITION                                                     *
+*&---------------------------------------------------------------------------------------------------------------*
+CLASS cl_alv DEFINITION.
+
+  PUBLIC SECTION.
+    TYPES:
+      "Type used with the instractions on how the alv should be build :
+      BEGIN OF ty_instraction,
+        table     TYPE REF TO data, "Table refference that contains the data to be displayed
+        fieldname TYPE string,      "Field name from which the data are retrived
+        field     TYPE REF TO data, "A refference of the field used to determin the data type
+      END OF ty_instraction,
+
+      "Type used to constract the alv field catalog :
+      BEGIN OF ty_column,
+        column_name        TYPE string,        "Column name
+        column_text        TYPE string,        "Complete column text
+        column_text_medium TYPE string,        "Medium size column text
+        column_text_short  TYPE string,        "Short size column text
+        column_length      TYPE i,             "Column length
+        column_vissible    TYPE abap_bool,     "Set vissibility of the column on output ALV
+      END OF ty_column,
+
+      ty_t_instraction TYPE STANDARD TABLE OF ty_instraction WITH KEY table fieldname,
+      ty_t_column      TYPE STANDARD TABLE OF ty_column      WITH KEY column_name.
+    .
+    CLASS-DATA:
+      alv_table         TYPE REF TO cl_salv_table " ALV table object
+    .
+    CLASS-METHODS:
+      display_alv ,                                                     "void, display ALV (needs to be created first)
+      create_alv  ,                                                     "void, builds the ALV
+      add_instraction IMPORTING REFERENCE(im_table) TYPE table          "void, add instraction on how the ALV will be build
+                                im_fieldname        TYPE string,
+      add_column_instraction  IMPORTING column_name        TYPE string  "void, add instraction on how the column will be displayed
+                                        column_text        TYPE string
+                                        column_text_medium TYPE string    OPTIONAL
+                                        column_text_short  TYPE string    OPTIONAL
+                                        column_length      TYPE i         OPTIONAL
+                                        column_vissible    TYPE abap_bool OPTIONAL
+
+                              .
+
+
+  PRIVATE SECTION.
+    CLASS-DATA: lt_instractions TYPE ty_t_instraction,  "Table with instractions on how the ALV will be build
+                lt_column       TYPE ty_t_column,       "Table with instractions on how the columns will be shown
+                ls_column       TYPE ty_column,         "Structure used with lt_column
+
+                ref_struct_obj  TYPE REF TO data,       "Refference to stracture with output ALV fields
+                ref_table_obj   TYPE REF TO data        "Refferene to table with output ALV fields
+
+                .
+    CLASS-METHODS: build_field_catalog CHANGING lo_columns TYPE REF TO cl_salv_columns.
+
+ENDCLASS.
+
+
+*&---------------------------------------------------------------------------------------------------------------*
+*&                                              Implimentation                                                   *
+*&---------------------------------------------------------------------------------------------------------------*
+CLASS cl_alv IMPLEMENTATION.
+
+  METHOD display_alv.
+
+    IF alv_table IS NOT INITIAL.
+      alv_table->display( ).
+    ENDIF.
+
+  ENDMETHOD.
+
+  METHOD create_alv.
+
+    DATA : ref_struct TYPE REF TO cl_abap_structdescr,
+           ref_table  TYPE REF TO cl_abap_tabledescr,
+           ls_comp    TYPE cl_abap_structdescr=>component,
+           lt_comp    TYPE cl_abap_structdescr=>component_table,
+           lv_name    TYPE string,
+           lv_index   TYPE i,
+           lv_index2  TYPE i
+           .
+    FIELD-SYMBOLS: <fs_struct>      TYPE any,
+                   <fs_struct_alv>  TYPE any,
+                   <fs_struct_alv2> TYPE any,
+                   <fs_table>       TYPE STANDARD TABLE,
+                   <fs_table_alv>   TYPE STANDARD TABLE,
+                   <fs_field>       TYPE any,
+                   <fs_field_alv>   TYPE any
+                   .
+    SORT lt_instractions BY table.
+*    Create custom table based on instractions :
+    lv_index = 1.
+    LOOP AT lt_instractions INTO DATA(ls_instractions).
+      ls_comp-name = ls_instractions-fieldname.
+      ls_comp-type ?= cl_abap_elemdescr=>describe_by_data_ref( ls_instractions-field ).
+      APPEND ls_comp TO lt_comp.
+      lv_index = lv_index + 1.
+    ENDLOOP.
+    "Create structure :
+    TRY.
+        ref_struct = cl_abap_structdescr=>create( p_components = lt_comp ).
+      CATCH cx_sy_struct_creation .
+    ENDTRY.
+    "Create the table :
+    TRY.
+        ref_table = cl_abap_tabledescr=>create( ref_struct ).
+      CATCH cx_sy_table_creation .
+    ENDTRY.
+    CREATE DATA: ref_table_obj  TYPE HANDLE ref_table,
+                 ref_struct_obj TYPE HANDLE ref_struct.
+    ASSIGN ref_struct_obj->* TO <fs_struct_alv>.
+    ASSIGN ref_table_obj->* TO <fs_table_alv>.
+
+*Fill ALV table with data :
+    LOOP AT lt_instractions INTO ls_instractions. "Loop on instructions
+      AT NEW table. "From every table that we have data :
+        ASSIGN ls_instractions-table->* TO <fs_table>.  "Get the table reference in a field symbol
+        lv_index = 1.                                   "Keep an index
+        LOOP AT <fs_table> ASSIGNING <fs_struct>.       "Loop on every record of the table the user imported
+          CLEAR <fs_struct_alv>.                        "Clear work area
+* Get Values From Table User Imported :
+          LOOP AT lt_instractions INTO DATA(ls_instractions2) WHERE table = ls_instractions-table.        "Loop on the instractions
+            ASSIGN COMPONENT ls_instractions2-fieldname OF STRUCTURE <fs_struct> TO <fs_field>.           "and for every field from
+            IF sy-subrc = 0.                                                                              "the table the user imported
+              ASSIGN COMPONENT ls_instractions2-fieldname OF STRUCTURE <fs_struct_alv> TO <fs_field_alv>. "get the value
+              <fs_field_alv> = <fs_field>.
+            ENDIF.
+          ENDLOOP.
+*  Insert valus in alv table that is to be displayed :
+          IF lines( <fs_table_alv> ) < lv_index. "If we gather more records than the table currently has, append new line
+            APPEND <fs_struct_alv> TO <fs_table_alv>.
+          ELSE.                                  "Else modify the appropriate field
+            LOOP AT lt_instractions INTO DATA(ls_instractions3) WHERE table = ls_instractions-table.         "Modify output
+              ASSIGN <fs_table_alv>[ lv_index ] TO <fs_struct_alv2>.
+              ASSIGN COMPONENT ls_instractions3-fieldname OF STRUCTURE <fs_struct> TO <fs_field>.
+              IF sy-subrc = 0.
+                ASSIGN COMPONENT ls_instractions3-fieldname OF STRUCTURE <fs_struct_alv2> TO <fs_field_alv>.
+                <fs_field_alv> = <fs_field>.
+              ENDIF.
+            ENDLOOP.
+          ENDIF.
+          lv_index = lv_index + 1.
+        ENDLOOP.
+      ENDAT.
+    ENDLOOP.
+
+    DATA lo_cols  TYPE REF TO cl_salv_columns.   " Columns object
+
+    cl_salv_table=>factory( IMPORTING r_salv_table = alv_table
+                            CHANGING t_table = <fs_table_alv>
+                           ).
+    IF lt_column IS NOT INITIAL.
+      lo_cols = alv_table->get_columns( ).
+      build_field_catalog( CHANGING lo_columns = lo_cols ).
+    ENDIF.
+    alv_table->display( ).
+
+  ENDMETHOD.
+
+  METHOD add_instraction.
+    FIELD-SYMBOLS: <fs_field_ref> TYPE any,
+                   <fs_field>     TYPE any.
+    DATA ls_instraction TYPE ty_instraction.
+
+    IF lines( im_table ) > 0.
+      READ TABLE im_table ASSIGNING FIELD-SYMBOL(<fs_struct>) INDEX 1.
+      ASSIGN COMPONENT im_fieldname OF STRUCTURE <fs_struct>  TO <fs_field>.
+      IF sy-subrc = 0.
+        GET REFERENCE OF <fs_field> INTO ls_instraction-field.
+        GET REFERENCE OF im_table INTO ls_instraction-table.
+        ls_instraction-fieldname = im_fieldname.
+        APPEND ls_instraction TO lt_instractions.
+      ENDIF.
+    ELSE.
+      BREAK-POINT.
+    ENDIF.
+  ENDMETHOD.
+
+  METHOD add_column_instraction.
+    CLEAR ls_column.
+    ls_column-column_name = column_name.
+    ls_column-column_text = column_text.
+    IF column_length IS NOT INITIAL.
+      ls_column-column_length = column_length.
+    ENDIF.
+    IF column_text_medium IS NOT INITIAL.
+      ls_column-column_text_medium = column_text_medium.
+    ENDIF.
+    IF column_text_short IS NOT INITIAL.
+      ls_column-column_text_short = column_text_short.
+    ENDIF.
+    IF column_vissible IS NOT INITIAL.
+      ls_column-column_vissible = column_vissible.
+    ENDIF.
+    APPEND ls_column TO lt_column.
+  ENDMETHOD.
+
+  METHOD build_field_catalog.
+
+    DATA: lo_column TYPE REF TO cl_salv_column, "Creating a local reference to be used to get the reference of a column from lo_cols
+          lv_index  TYPE sy-index               "Creating an index variable to be used with the loop below
+          .
+    "Create field catalog :
+    LOOP AT lt_column INTO DATA(ls_column).
+      lv_index = sy-index.
+      TRY.
+          lo_column = lo_columns->get_column( CONV #( ls_column-column_name ) ).
+          lo_column->set_long_text( CONV #( ls_column-column_text ) ).
+          IF ls_column-column_text_medium IS NOT INITIAL.
+            lo_column->set_medium_text( CONV #( ls_column-column_text_medium ) ).
+          ELSE.
+            lo_column->set_short_text( CONV #( ls_column-column_text ) ).
+          ENDIF.
+          IF ls_column-column_text_short IS NOT INITIAL.
+            lo_column->set_short_text( CONV #( ls_column-column_text_short ) ).
+          ELSE.
+            lo_column->set_short_text( CONV #( ls_column-column_text ) ).
+          ENDIF.
+          IF ls_column-column_length IS NOT INITIAL.
+            lo_column->set_output_length( CONV #( ls_column-column_length ) ).
+          ELSE.
+            lo_column->set_optimized( 'X' ).
+          ENDIF.
+          IF ls_column-column_length IS NOT INITIAL.
+            lo_column->set_visible( ls_column-column_vissible ).
+          ELSE.
+            lo_column->set_visible( abap_true ).
+          ENDIF.
+        CATCH cx_salv_not_found.
+          "Column not found in lt_output
+      ENDTRY.
+    ENDLOOP.
+
+  ENDMETHOD.
+
+ENDCLASS.
