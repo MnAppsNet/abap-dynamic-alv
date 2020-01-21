@@ -20,11 +20,28 @@
 *&              > Use static method display_alv to display the ALV created (need to be created first)
 *&              > Change global static object alv_table to make any further changes on the ALV output
 *&                (need to be created first)
+*&              > Use static method clear to discart all the instractions
+*&              > Use static method dispose_alv to dispose the alv_table
+*&              > Use static method row_count to get the number of rows of output table
+*&              > Use static method get_field to get the value of a cell.
+*&                It takes 3 parameters :
+*&                 *im_row         : The row index that we want to get the field from
+*&                 *im_column_name : The column name from which we get the value
+*&                 *ch_content     : The value of the cell is returned here
+*&              > Use static method get_row to get a row from table
+*&                It takes 2 parameters :
+*&                 *im_row         : The row index that we want to return
+*&                 *ch_struct      : The row is returned here
+*&              > Use static method get_selected_cell to get the value of selected cell
+*&               It takes 1 parameter :
+*&                 *ch_content     : The values of the cell is returned here
+*&              > Use static method get_selected_row to get a selected row
+*&               It takes 2 parameters :
+*&                 *im_row_number : The row number from the rows selected (ex. 1st, 2nd ...) (optional, Default = 1 )
+*&                 *ch_struct     : The row is returned here
 *&---------------------------------------------------------------------------------------------------------------*
+REPORT ztest.
 
-*&---------------------------------------------------------------------------------------------------------------*
-*&                                                DEFINITION                                                     *
-*&---------------------------------------------------------------------------------------------------------------*
 CLASS cl_alv DEFINITION.
 
   PUBLIC SECTION.
@@ -55,6 +72,17 @@ CLASS cl_alv DEFINITION.
     CLASS-METHODS:
       display_alv ,                                                     "void, display ALV (needs to be created first)
       create_alv  ,                                                     "void, builds the ALV
+      clear       ,                                                     "void, clears all ALV instractions and disposes table
+      dispose_alv ,                                                     "void, disposes alv_table
+      row_count RETURNING VALUE(rt_count) TYPE i    ,                   "int , returns number of rows
+      get_field IMPORTING im_row          TYPE i                        "data, returns the content of a field
+                          im_column_name  TYPE string
+                CHANGING  ch_content      TYPE data ,
+      get_row   IMPORTING im_row          TYPE i                        "data, returns a row in a structure given by user
+                CHANGING  ch_struct       TYPE data ,
+      get_selected_cell CHANGING ch_content TYPE data ,
+      get_selected_row  IMPORTING im_row_number TYPE i OPTIONAL         "data, returns a selected row in a structure given by user
+                        CHANGING ch_struct  TYPE data ,
       add_instraction IMPORTING REFERENCE(im_table) TYPE table          "void, add instraction on how the ALV will be build
                                 im_fieldname        TYPE string,
       add_column_instraction  IMPORTING column_name        TYPE string  "void, add instraction on how the column will be displayed
@@ -85,6 +113,73 @@ ENDCLASS.
 *&                                              Implimentation                                                   *
 *&---------------------------------------------------------------------------------------------------------------*
 CLASS cl_alv IMPLEMENTATION.
+
+  METHOD get_selected_cell.
+    DATA ls_cell TYPE SALV_S_CELL.
+    ls_cell = alv_table->get_selections( )->get_current_cell( ).
+    ch_content = ls_cell-value.
+  ENDMETHOD.
+
+  METHOD get_selected_row.
+    DATA: lt_rows TYPE SALV_T_ROW,
+          lv_row  TYPE i VALUE 1.
+    IF im_row_number IS NOT INITIAL.
+      lv_row = im_row_number.
+    ENDIF.
+
+    lt_rows = alv_table->get_selections( )->get_selected_rows( ).
+
+    get_row(
+      EXPORTING im_row = lt_rows[ lv_row ]
+      CHANGING  ch_struct = ch_struct
+    ).
+  ENDMETHOD.
+
+  METHOD get_field.
+    IF ref_table_obj IS NOT INITIAL.
+      FIELD-SYMBOLS: <fs_table> TYPE STANDARD TABLE,
+                     <fs_field> TYPE ANY.
+      ASSIGN ref_table_obj->* TO <fs_table>.
+      IF lines( <fs_table> ) >= im_row.
+        ASSIGN COMPONENT im_column_name OF STRUCTURE <fs_table>[ im_row ] TO <fs_field>.
+        IF SY-SUBRC = 0.
+          ch_content = <fs_field>.
+        ENDIF.
+      ENDIF.
+    ENDIF.
+  ENDMETHOD.
+
+  METHOD GET_ROW.
+    IF ref_table_obj IS NOT INITIAL.
+      FIELD-SYMBOLS: <fs_table> TYPE STANDARD TABLE.
+      ASSIGN ref_table_obj->* TO <fs_table>.
+      IF lines( <fs_table> ) >= im_row.
+        ch_struct = <fs_table>[ im_row ].
+      ENDIF.
+    ENDIF.
+  ENDMETHOD.
+
+  METHOD clear.
+    REFRESH : lt_instractions, lt_column.
+    CLEAR   : ls_column.
+  ENDMETHOD.
+
+  METHOD dispose_alv.
+    TRY.
+        alv_table->close_screen( ).
+      CATCH cx_root.
+
+    ENDTRY.
+    CLEAR alv_table.
+  ENDMETHOD.
+
+  METHOD row_count.
+    IF ref_table_obj IS NOT INITIAL.
+     FIELD-SYMBOLS <fs_table> TYPE STANDARD TABLE.
+     ASSIGN ref_table_obj->* TO <fs_table>.
+     rt_count = lines( <fs_table> ).
+    ENDIF.
+  ENDMETHOD.
 
   METHOD display_alv.
 
